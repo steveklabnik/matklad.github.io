@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Notes On Module System</title>
+  <meta name="description"
+    content="Unedited summary of what I think a better module system for a Rust-likelanguage would look like.">
+  <link rel="canonical" href="https://matklad.github.io//2021/11/27/notes-on-module-system.html">
+  <link rel="alternate" type="application/rss+xml" title="matklad" href="https://matklad.github.io//feed.xml">
+
+  <style>
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('/css/JetBrainsMono-Regular.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('/css/JetBrainsMono-Bold.woff2') format('woff2');
+      ;
+      font-weight: bold;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      margin-block-start: 0;
+      margin-block-end: 0;
+    }
+
+    h1,
+    h2,
+    h3 {
+      font-weight: 300;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    main {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      max-width: 80ch;
+      padding-left: 2ch;
+      padding-right: 2ch;
+    }
+
+    .site-header {
+      width: 100%;
+      max-width: 80ch;
+      margin-bottom: 1.5rem;
+    }
+
+    .site-header>nav {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .site-header .-title {
+      flex-grow: 2;
+    }
+
+    .site-footer {
+      display: flex;
+      justify-content: center;
+      align-items: baseline;
+      width: 100%;
+      max-width: 80ch;
+      margin-top: 1rem;
+      height: 2rem;
+      padding-left: 1ch;
+      padding-right: 1ch;
+    }
+  </style>
+  <link rel="stylesheet" href=" /css/adoc.css">
+  <link rel="stylesheet" href=" /css/rouge-github.css">
+  <link rel="stylesheet" href=" /css/main.css">
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css?family=EB+Garamond:400,400italic,700,700italic%7COpen+Sans:300">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.4.0/css/font-awesome.min.css">
+</head>
+
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="-title" href="/">matklad</a>
+      
+      
+      <a href="/about/">About</a>
+      
+      
+      
+      
+      
+      <a href="/resume/">Resume</a>
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+    </nav>
+  </header>
+
+  <main>
+    <article>
+  <h1>Notes On Module System</h1>
+  <div class="post-meta sect1">Nov 27, 2021</div>
+  <div class="paragraph">
+<p>Unedited summary of what I think a better module system for a Rust-like
+language would look like.</p>
+</div>
+<div class="paragraph">
+<p>Today&#8217;s Rust module system is it&#8217;s most exciting feature, after borrow checker.
+Explicit separation between crates (which form a DAG) and modules (which might
+be mutually dependent) and the absence of a single global namespace (crates
+don&#8217;t have innate names; instead, the name is written on a dependency edge
+between two crates, and the same crate might be known under different names in
+two of its dependents) makes decentralized ecosystems of libraries a-la
+crates.io robust. Specifically, Rust allows linking-in several versions of the
+same crate without the fear of naming conflicts.</p>
+</div>
+<div class="paragraph">
+<p>However, the specific surface syntax we use to express the model I feel is
+suboptimal. Module system is pretty confusing (in the pre-2018 surveys, it was
+by far the most confusing aspect of the language after lifetimes. Post-2018
+system is better, but there are still regular questions about module system).
+What can we do better?</p>
+</div>
+<div class="paragraph">
+<p><em>First</em>, be more precise about visibilities. The most single most important
+question about an item is "can it be visible outside of CU?". Depending on the
+answer to that, you have either closed world (all usages are known) or open
+world (usages are not-knowable) assumption. This should be reflected in the
+modules system. <code>pub</code> is for "visible inside the whole CU, but not further".
+<code>export</code> or (my favorite) <code>pub*</code> is for "visible to the outer world". You sorta
+can have these in today&#8217;s rust with <code>pub(crate)</code>, <code>-Dunreachable_pub</code> and some
+tolerance for compiler false-positive.</p>
+</div>
+<div class="paragraph">
+<p>I am not sure if the rest of Rust visibility systems pulls its weight. It is OK,
+but it is pretty complex <code>pub(in some::path)</code> and doesn&#8217;t <em>really</em> help&#8201;&#8212;&#8201;making visibilities more precise within a single CU doesn&#8217;t meaningfully make
+the code better, as you can control and rewrite all the code anyway. CU doesn&#8217;t
+have internal boundaries which can be reflected in visibilities. If we go this
+way, we get a nice, simple system: <code>fn foo()</code> is visible in the current module
+only (not its children), <code>pub fn foo()</code> is visible anywhere inside the current
+crate, and <code>pub* fn foo()</code> is visible to other crates using ours. But then,
+again, the current tree-based visibility is OK, can leave it in as long as
+<code>pub/pub*</code> is more explicit and <code>-Dunreachable_pub</code> is an error by default.</p>
+</div>
+<div class="paragraph">
+<p>In a similar way, the fact that <code>use</code> is an item (ie, <code>a::b</code> can <code>use</code> items
+imported in <code>a</code>) is an unnecessary cuteness. Imports should only introduce the
+name into module&#8217;s namespace, and should be separate from intentional
+re-exports. It <em>might</em> make sense to ban glob re-export&#8201;&#8212;&#8201;this&#8217;ll give you a
+nice property that all the names existing in the module are spelled out
+explicitly, which is useful for tooling. Though, as Rust has namespaces, looking
+at <code>pub use submod::thing</code> doesn&#8217;t tell you whether the thing is a type or a
+value, so this might not be a meaningful property after all.</p>
+</div>
+<div class="paragraph">
+<p>The <em>second</em> thing to change would be module tree/directory structure mapping.
+The current system creates quite some visible problems:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>library/binary confusion. It&#8217;s common for new users to have <code>mod foo;</code> in both
+<code>src/main.rs</code> and <code>src/lib.rs</code>.</p>
+</li>
+<li>
+<p><code>mod {}</code> file confusion&#8201;&#8212;&#8201;it&#8217;s common (even for some production code I&#8217;ve
+seen) to have <code>mod foo { stuff }</code> <em>inside</em> <code>foo.rs</code>.</p>
+</li>
+<li>
+<p>duplicate inclusion&#8201;&#8212;&#8201;again, it&#8217;s common to start every file in <code>tests/</code> with
+<code>mod common;</code>. Rust book even recommends some awful work-around to put common
+into <code>common/mod.rs</code>, just so it itself isn&#8217;t treated as a test.</p>
+</li>
+<li>
+<p>inconsistency&#8201;&#8212;&#8201;large projects which don&#8217;t have super-strict code style
+process end up using both the older <code>foo/mod.rs</code> and the newer <code>foo.rs, foo/*</code>
+conventions.</p>
+</li>
+<li>
+<p>forgotten files&#8201;&#8212;&#8201;it is again pretty common to have some file somewhere in
+<code>src/</code> which isn&#8217;t actually linked into the module tree at all by mistake.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>A bunch of less-objective issues:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p><code>mod.rs</code>-less system is self-inconsistent. <code>lib.rs</code> and <code>main.rs</code> <em>still</em>
+behave like <code>mod.rs</code>, in a sense that nested modules are their direct
+siblings, and not in the <code>lib</code> directory.</p>
+</li>
+<li>
+<p>naming for crates roots (<code>lib.rs</code> and <code>main.rs</code>) is ad-hoc</p>
+</li>
+<li>
+<p>current system doesn&#8217;t work well for tools, which have to iteratively
+discover the module tree. You can&#8217;t process all of the crate&#8217;s files in
+parallel, because you don&#8217;t know what those files are until you process them.</p>
+</li>
+</ul>
+</div>
+<div class="paragraph">
+<p>I think a better system would say that a compilation unit is equivalent to a
+directory with Rust source files, and that (relative) file paths correspond to
+module paths. There&#8217;s neither <code>mod foo;</code> nor <code>mod foo {}</code> (yes, sometimes those
+are genuinely useful. No, the fact that something <em>can</em> be useful doesn&#8217;t mean
+it should be part of the language&#8201;&#8212;&#8201;it&#8217;s very hard to come up with a language
+features which would be completely useless (though <code>mod foo {}</code> I think can be
+added back relatively painless)). We use <code>mod.rs</code>, but we name it
+<code>_$name_of_the_module$.rs</code> instead, to solve two issues: sort it first
+alphabetically, and generate a unique fuzzy-findable name. So, something like
+this:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+</pre></td><td class="code"><pre>/home/matklad/projects/regex
+  Cargo.toml
+  src/
+    _regex.rs
+    parsing/
+      _parsing.rs
+      ast.rs
+    rt/
+     _rt.rs
+     dfa.rs
+     nfa.rs
+  bins/
+    grep/
+      _grep.rs
+      cli.rs
+  tests/
+    _tests.rs   # just a single integration tests binary by default!
+    lookahead.rs
+    fuzz.rs
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The library there would give the following module tree:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno">1
+2
+3
+4
+</pre></td><td class="code"><pre>crate::{
+    parsing::{ast}
+    rt::{nfa, dfa}
+}
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>To do conditional compilation, you&#8217;d do:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno">1
+2
+3
+4
+</pre></td><td class="code"><pre>mutex/
+  _mutex.rs
+  linux_mutex.rs
+  windows_mutex.rs
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>where <code>_mutex.rs</code> is</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+</pre></td><td class="code"><pre><span class="nd">#[cfg(linux)]</span>
+<span class="k">use</span> <span class="n">linux_mutex</span> <span class="k">as</span> <span class="n">os_mutex</span><span class="p">;</span>
+<span class="nd">#[cfg(windows)]</span>
+<span class="k">use</span> <span class="n">windows_mutex</span> <span class="k">as</span> <span class="n">os_mutex</span><span class="p">;</span>
+
+<span class="k">pub</span> <span class="k">struct</span> <span class="n">Mutex</span> <span class="p">{</span>
+   <span class="n">inner</span><span class="p">:</span> <span class="nn">os_mutex</span><span class="p">::</span><span class="n">Mutex</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>and <code>linux_mutex.rs</code> starts with <code><mark>![cfg(linux)]</code>. But of course we shouldn&#8217;t
+implement conditional compilation by barbarically cutting the AST, and instead
+should push conditional compilation to after the type checking, so that you at
+least can check, on Linux, that the windows version of your code wouldn&#8217;t fail
+due to some stupid typos in the name of <code></mark>[cfg(windows)]</code> functions. Alas, I
+don&#8217;t know how to design such conditional compilation system.</p>
+</div>
+<div class="paragraph">
+<p>The same re-export idiom would be used for specifying non-default visibility:
+<code>pub* use rt;</code> would make <code>regex::rt</code> a public module (yeah, this
+particular bit is sketchy :-) ).</p>
+</div>
+<div class="paragraph">
+<p>I think this approach would make most of pitfalls impossible. E.g, it wouldn&#8217;t
+be possible to mix several different crates in one source tree. Additionally,
+it&#8217;d be a great help for IDEs, as each file can be processed independently, and
+it would be clear just from the file contents and path where in the crate
+namespace the items are mounted, unlocking
+<a href="https://rust-analyzer.github.io/blog/2020/07/20/three-architectures-for-responsive-ide.html">map-reduce
+style IDE</a>.</p>
+</div>
+<div class="paragraph">
+<p>While we are at it, <code>use</code> definitely should use exactly the same path resolution
+rules as the rest of the language, without any kind of "implicit leading <code>::</code> "
+special cases. Oh, and we shouldn&#8217;t have nested use groups:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno">1
+2
+3
+4
+</pre></td><td class="code"><pre><span class="k">use</span> <span class="nn">collections</span><span class="p">::{</span>
+    <span class="nn">hash</span><span class="p">::{</span><span class="n">HashMap</span><span class="p">,</span> <span class="n">HashSet</span><span class="p">},</span>
+    <span class="n">BTreeMap</span><span class="p">,</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Some projects use them, some projects don&#8217;t use them, sufficiently large
+projects inconsistently both use and don&#8217;t use them.</p>
+</div>
+<div class="paragraph">
+<p>Afterword: as I&#8217;ve said in the beginning, this is unedited and not generally
+something I&#8217;ve thought very hard and long about. Please don&#8217;t take this as one
+true way to do things, my level of confidence about these ideas is about <code>0.5</code> I
+guess.</p>
+</div>
+</article>
+
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      <a href="https://github.com/matklad/matklad.github.io/edit/master/_posts/2021-11-27-notes-on-module-system.adoc">
+        <i class="fa fa-edit"></i> fix typo
+      </a>
+
+      <a href=" /feed.xml">
+        <i class="fa fa-rss"></i> rss
+      </a>
+
+      <a href="https://github.com/matklad">
+        <i class="fa fa-github"></i> matklad
+      </a>
+    </p>
+  </footer>
+</body>
+
+</html>

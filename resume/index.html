@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Resume</title>
+  <meta name="description"
+    content="Yet another programming blog by Aleksey Kladov aka matklad.
+">
+  <link rel="canonical" href="https://matklad.github.io//resume/">
+  <link rel="alternate" type="application/rss+xml" title="matklad" href="https://matklad.github.io//feed.xml">
+
+  <style>
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('/css/JetBrainsMono-Regular.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('/css/JetBrainsMono-Bold.woff2') format('woff2');
+      ;
+      font-weight: bold;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      margin-block-start: 0;
+      margin-block-end: 0;
+    }
+
+    h1,
+    h2,
+    h3 {
+      font-weight: 300;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    main {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      max-width: 80ch;
+      padding-left: 2ch;
+      padding-right: 2ch;
+    }
+
+    .site-header {
+      width: 100%;
+      max-width: 80ch;
+      margin-bottom: 1.5rem;
+    }
+
+    .site-header>nav {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .site-header .-title {
+      flex-grow: 2;
+    }
+
+    .site-footer {
+      display: flex;
+      justify-content: center;
+      align-items: baseline;
+      width: 100%;
+      max-width: 80ch;
+      margin-top: 1rem;
+      height: 2rem;
+      padding-left: 1ch;
+      padding-right: 1ch;
+    }
+  </style>
+  <link rel="stylesheet" href=" /css/adoc.css">
+  <link rel="stylesheet" href=" /css/rouge-github.css">
+  <link rel="stylesheet" href=" /css/main.css">
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css?family=EB+Garamond:400,400italic,700,700italic%7COpen+Sans:300">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.4.0/css/font-awesome.min.css">
+</head>
+
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="-title" href="/">matklad</a>
+      
+      
+      <a href="/about/">About</a>
+      
+      
+      
+      
+      
+      <a href="/resume/">Resume</a>
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+    </nav>
+  </header>
+
+  <main>
+    <div id="preamble">
+<div class="sectionbody">
+<div class="paragraph">
+<p>Welcome to my resume!
+It consists of two parts.
+The first part is the free-form narrative of what I do work-wise.
+This is something <em>I</em> would be excited to read from a person I am going to work with.
+The second part is a more traditional bullet-list of companies, positions, and projects.
+The resume is available <a href="https://matklad.github.io/resume/">.html</a> and <a href="https://matklad.github.io/resume.pdf">.pdf</a>. Here we go!</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="narrative"><a class="anchor" href="#narrative"></a>Narrative</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>I used to do math.
+Although I no longer do mathematics daily, it is the basis I use to think about programming.
+I enjoy solving an occasional puzzle.
+See <a href="https://matklad.github.io/2021/11/07/generate-all-the-things.html">&#8220;Generate All the Things&#8221;</a> and <a href="https://matklad.github.io/2020/11/01/notes-on-paxos.html">&#8220;Notes on Paxos&#8221;</a> articles as examples of math I like.</p>
+</div>
+<div class="paragraph">
+<p>I am a programmer.
+I like writing code just for the sake of it.
+I like deleting code even more.
+I like short, simple, robust and beautiful code, which not only gets the job done, but does it in an obviously correct way.
+See, eg, <a href="https://github.com/rust-analyzer/ungrammar/tree/42810d770e4cddec2a5fff658489fa72f3b28a7c"><code>ungrammar</code></a> for an example of relatively short and self-contained piece of programming.</p>
+</div>
+<div class="paragraph">
+<p>I am a pragmatist.
+The above two points sound outright scary, but don&#8217;t worry :)
+While I do enjoy encoding lambda calculus in types, that&#8217;s not what I spend most of my time on.
+I see most code as something to be replaced and re-written later, and optimise for making changes over time, not for perfection right now.
+<a href="https://github.com/rust-analyzer/rust-analyzer/blob/d9b2291f546abc77d24499339a72a89127464b95/docs/dev/style.md#scale-of-changes">This section</a> from rust-analyzer style guide is a good example of this.</p>
+</div>
+<div class="paragraph">
+<p>I loathe accidental complexity.
+I think I spend most of my time trying to make things simpler, trying to remove parts, trying to make foundational APIs more crisp.
+I have a visceral reaction to the gaps between how the thing <em>should</em> be, and how they are.
+<a href="https://github.com/matklad/cargo-xtask/tree/a49054989203a877f899d1285b5f3d642cf36d11"><code>cargo xtask</code></a> pattern shows to what lengths I am willing to go just to get rid of the mess the unix shell is.</p>
+</div>
+<div class="paragraph">
+<p>I build systems.
+Software engineering is programming integrated over time, and it&#8217;s that time dimension that really matters.
+The shape of the software today is determined by accidental, runaway, viral successes of yesterday.
+There&#8217;s a reason why VT100 interface is still programmed against today, and it is not its technical adequacy.
+<a href="https://www.tedinski.com/2018/01/30/the-one-ring-problem-abstraction-and-power.html">This is not my article</a>, but I like it so much that I&#8217;ll advertise it even in my resume.
+System&#8217;s thinking is why I am fascinated with Rust and not, eg, with Kotlin.
+Since Java with its reasonably fast managed runtime, Rust is the first PL revolution which meaningfully changes how we write software, and not just repacks known-good idioms with a better syntax (which is also important!, just not as exciting!).</p>
+</div>
+<div class="paragraph">
+<p>I build open source communities.
+My biggest successes so far I think are <a href="https://github.com/intellij-rust/intellij-rust"><code>IntelliJ Rust</code></a> and <a href="https://github.com/rust-analyzer/rust-analyzer"><code>rust-analyzer</code></a>.
+I didn&#8217;t write the hardest, smartest bits of those.
+But I tried very hard to make sure that others can do that, by removing accidental complexity, by making contribution enjoyable, by trying to program the architecture which would be robust to time and systems effects.</p>
+</div>
+<div class="paragraph">
+<p>More generally, I help build moderately large projects, which are combinations of all of the above: people, systematic forces, beautiful mathematical abstractions at the core, and hundreds of thousands of lines of code as a physical manifestation.
+See <a href="https://matklad.github.io/2021/09/05/Rust100k.html">&#8220;One Hundred Thousand Lines of Rust&#8221;</a> series for a bunch of concrete, pragmatic lessons I&#8217;ve learned so far.</p>
+</div>
+<div class="paragraph">
+<p>I love teaching!
+See, for example, my Russian Rust Course (<a href="https://www.youtube.com/watch?v=Oy_VYovfWyo&amp;list=PLlb7e2G7aSpTfhiECYNI2EZ1uAluUqE_e">YouTube</a>), a series of videos about rust-analyzer (<a href="https://www.youtube.com/watch?v=I3RXottNwk0&amp;list=PLhb66M_x9UmrqXhQuIpWC5VgTdrGxMx3y">YouTube</a>), or <a href="https://matklad.github.io/2020/04/13/simple-but-powerful-pratt-parsing.html">the article about Pratt parsers</a>.</p>
+</div>
+<div class="paragraph">
+<p>Oh, and I love writing :-)</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="bullet-list"><a class="anchor" href="#bullet-list"></a>Bullet List</h2>
+<div class="sectionbody">
+<div class="sect2">
+<h3 id="personal-details"><a class="anchor" href="#personal-details"></a>Personal Details</h3>
+<div class="hdlist">
+<table>
+<tr>
+<td class="hdlist1">
+Name
+</td>
+<td class="hdlist2">
+<p>Aleksey Kladov</p>
+</td>
+</tr>
+<tr>
+<td class="hdlist1">
+Contacts
+</td>
+<td class="hdlist2">
+<div class="ulist">
+<ul>
+<li>
+<p><span class="icon"><i class="fa fa-github"></i></span> <a href="https://github.com/matklad" class="bare">https://github.com/matklad</a></p>
+</li>
+<li>
+<p><span class="icon"><i class="fa fa-link"></i></span> <a href="http://matklad.github.io" class="bare">http://matklad.github.io</a></p>
+</li>
+<li>
+<p><span class="icon"><i class="fa fa-envelope"></i></span> See GitHub profile</p>
+</li>
+</ul>
+</div>
+</td>
+</tr>
+</table>
+</div>
+</div>
+<div class="sect2">
+<h3 id="education"><a class="anchor" href="#education"></a>Education</h3>
+<div class="ulist">
+<ul>
+<li>
+<p>2014-2016, Masters of Software Engineering (unfinished),
+<strong>St. Petersburg State University of RAS</strong></p>
+</li>
+<li>
+<p>2009-2014, Specialist of Software Engineering,
+<strong>St. Petersburg State University</strong></p>
+</li>
+</ul>
+</div>
+</div>
+<div class="sect2">
+<h3 id="professional-experience"><a class="anchor" href="#professional-experience"></a>Professional Experience</h3>
+<div class="sect3">
+<h4 id="rust-programming-language"><a class="anchor" href="#rust-programming-language"></a>Rust Programming Language</h4>
+<div class="paragraph">
+<p><span class="icon"><i class="fa fa-calendar" title="Period"></i></span> <code>Sep 2015 to Now (ongoing)</code><br>
+<span class="icon"><i class="fa fa-link"></i></span> <a href="https://www.rust-lang.org/governance/teams/dev-tools" class="bare">https://www.rust-lang.org/governance/teams/dev-tools</a></p>
+</div>
+<div class="paragraph">
+<p>I am a member of the dev-tools team of the Rust programming language. I was one
+of the maintainers of <a href="https://github.com/rust-lang/cargo">Cargo</a>&#8201;&#8212;&#8201;the package
+manager for Rust. My primary interest is IDE support. I have bootstrapped both
+IntelliJ and LSP based Rust IDEs.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="near"><a class="anchor" href="#near"></a>NEAR</h4>
+<div class="paragraph">
+<p><span class="icon"><i class="fa fa-calendar" title="Period"></i></span> <code>Feb 2021 to Now (ongoing)</code><br>
+<span class="icon"><i class="fa fa-link"></i></span> <a href="https://near.org" class="bare">https://near.org</a></p>
+</div>
+<div class="paragraph">
+<p>At NEAR, I lead the contract runtime team which is responsible for secure,
+reliable, and fast execution of smart contracts in WASM.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="ferrous-systems"><a class="anchor" href="#ferrous-systems"></a>Ferrous Systems</h4>
+<div class="paragraph">
+<p><span class="icon"><i class="fa fa-calendar" title="Period"></i></span> <code>Sep 2018 to Feb 2021</code><br>
+<span class="icon"><i class="fa fa-link"></i></span> <a href="https://ferrous-systems.com" class="bare">https://ferrous-systems.com</a></p>
+</div>
+<div class="paragraph">
+<p>At Ferrous Systems I was leading the
+<a href="https://github.com/rust-analyzer/rust-analyzer">rust-analyzer/RLS-2.0</a> project:
+an experimental next-generation compiler with a specific goal of providing
+excellent IDE support for Rust.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="computer-science-center"><a class="anchor" href="#computer-science-center"></a>Computer Science Center</h4>
+<div class="paragraph">
+<p><span class="icon"><i class="fa fa-calendar" title="Period"></i></span> <code>Sep 2014 to Sep 2019</code><br>
+<span class="icon"><i class="fa fa-link"></i></span> <a href="https://compscicenter.ru/teachers/934/" class="bare">https://compscicenter.ru/teachers/934/</a></p>
+</div>
+<div class="paragraph">
+<p>At CSC I taught two major courses:</p>
+</div>
+<div class="dlist">
+<dl>
+<dt class="hdlist1">Programming In Rust <span class="icon"><i class="fa fa-youtube"></i></span> <a href="https://www.youtube.com/watch?v=Oy_VYovfWyo">video</a></dt>
+<dd>
+<p><span class="icon"><i class="fa fa-calendar" title="Period"></i></span> <code>Winter-Spring 2019</code><br>
+A semester long introduction course, focused on contrasting unique Rust
+features with more mainstream languages like C++ or Java.</p>
+</dd>
+<dt class="hdlist1">Programming In Python <span class="icon"><i class="fa fa-youtube"></i></span> <a href="https://www.youtube.com/watch?v=-py9GXvJk6A">video</a> </dt>
+<dd>
+<p><span class="icon"><i class="fa fa-calendar" title="Period"></i></span> <code>Autumn-Winter 2018</code><br>
+A semester long advanced course focusing on the language inner workings and
+programming idioms.</p>
+</dd>
+</dl>
+</div>
+<div class="paragraph">
+<p>I have also worked as a teaching assistant for "Algorithms and Data structures"
+and "Python" courses.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="jetbrains"><a class="anchor" href="#jetbrains"></a>JetBrains</h4>
+<div class="paragraph">
+<p><span class="icon"><i class="fa fa-calendar" title="Period"></i></span> <code>Sep 2015 to Jan 2018</code><br>
+<span class="icon"><i class="fa fa-link"></i></span> <a href="https://intellij-rust.github.io" class="bare">https://intellij-rust.github.io</a></p>
+</div>
+<div class="paragraph">
+<p>At JetBrains, I have lead the development of
+<a href="http://github.com/intellij-rust/intellij-rust">IntelljJ-Rust</a> plugin for the Rust
+programming language. The plugin is a Rust "compiler" written in Kotlin, with
+full-blown parser, name resolution and type inference algorithms, and
+integrations with build tools and debuggers. Besides solving the technical
+problems, I&#8217;ve created an open source community around the plugin by mentoring
+issues, writing developer documentation and supporting contributors.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="stepik-org"><a class="anchor" href="#stepik-org"></a>Stepik.org</h4>
+<div class="paragraph">
+<p><span class="icon"><i class="fa fa-calendar" title="Period"></i></span> <code>2012 to 2014</code><br>
+<span class="icon"><i class="fa fa-link"></i></span> <a href="http://stepik.org/" class="bare">http://stepik.org/</a></p>
+</div>
+<div class="paragraph">
+<p>Stepik is a e-learning platform, written in Python, focused on rich variety of
+practical exercises and ease of creating content. I was on the backend team of
+three from the start of the project. Among other things, I&#8217;ve worked on
+exercises subsystem and student&#8217;s code sandboxing, progress tracking and
+designed and implemented JSON API interface for the single-page frontend.</p>
+</div>
+</div>
+<div class="sect3">
+<h4 id="skills"><a class="anchor" href="#skills"></a>Skills</h4>
+<div class="ulist">
+<ul>
+<li>
+<p>Rust</p>
+</li>
+<li>
+<p>Compiler Frontend Development</p>
+</li>
+<li>
+<p>Medium Scale Software Development (less than a million lines of code)</p>
+</li>
+<li>
+<p>Building of Open Source Communities</p>
+</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+</div>
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      <a href="https://github.com/matklad/matklad.github.io/edit/master/resume.adoc">
+        <i class="fa fa-edit"></i> fix typo
+      </a>
+
+      <a href=" /feed.xml">
+        <i class="fa fa-rss"></i> rss
+      </a>
+
+      <a href="https://github.com/matklad">
+        <i class="fa fa-github"></i> matklad
+      </a>
+    </p>
+  </footer>
+</body>
+
+</html>

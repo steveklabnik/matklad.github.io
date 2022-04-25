@@ -1,0 +1,1032 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <title>Self Modifying Code</title>
+  <meta name="description"
+    content="This post has nothing to do with JIT-like techniques for patching machine code on the fly (though they are cool!).Instead, it describes a cute/horrible trick...">
+  <link rel="canonical" href="https://matklad.github.io//2022/03/26/self-modifying-code.html">
+  <link rel="alternate" type="application/rss+xml" title="matklad" href="https://matklad.github.io//feed.xml">
+
+  <style>
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('/css/JetBrainsMono-Regular.woff2') format('woff2');
+    }
+
+    @font-face {
+      font-family: 'JetBrains Mono';
+      src: url('/css/JetBrainsMono-Bold.woff2') format('woff2');
+      ;
+      font-weight: bold;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      margin-block-start: 0;
+      margin-block-end: 0;
+    }
+
+    h1,
+    h2,
+    h3 {
+      font-weight: 300;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    main {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      max-width: 80ch;
+      padding-left: 2ch;
+      padding-right: 2ch;
+    }
+
+    .site-header {
+      width: 100%;
+      max-width: 80ch;
+      margin-bottom: 1.5rem;
+    }
+
+    .site-header>nav {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .site-header .-title {
+      flex-grow: 2;
+    }
+
+    .site-footer {
+      display: flex;
+      justify-content: center;
+      align-items: baseline;
+      width: 100%;
+      max-width: 80ch;
+      margin-top: 1rem;
+      height: 2rem;
+      padding-left: 1ch;
+      padding-right: 1ch;
+    }
+  </style>
+  <link rel="stylesheet" href=" /css/adoc.css">
+  <link rel="stylesheet" href=" /css/rouge-github.css">
+  <link rel="stylesheet" href=" /css/main.css">
+  <link rel="stylesheet"
+    href="https://fonts.googleapis.com/css?family=EB+Garamond:400,400italic,700,700italic%7COpen+Sans:300">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.4.0/css/font-awesome.min.css">
+</head>
+
+<body>
+  <header class="site-header">
+    <nav>
+      <a class="-title" href="/">matklad</a>
+      
+      
+      <a href="/about/">About</a>
+      
+      
+      
+      
+      
+      <a href="/resume/">Resume</a>
+      
+      
+      
+      
+      
+      
+      
+      
+      
+      
+    </nav>
+  </header>
+
+  <main>
+    <article>
+  <h1>Self Modifying Code</h1>
+  <div class="post-meta sect1">Mar 26, 2022</div>
+  <div id="preamble">
+<div class="sectionbody">
+<div class="paragraph">
+<p>This post has nothing to do with JIT-like techniques for patching machine code on the fly (though they are cool!).
+Instead, it describes a cute/horrible trick/hack you can use to generate <em>source</em> code if you are not a huge fan of macros.
+The final technique is going to be independent of any particular programming language, but the lead-up is going to be Rust-specific.
+The pattern can be applied to a wide variety of tasks, but we&#8217;ll use a model problem to study different solutions.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="problem"><a class="anchor" href="#problem"></a>Problem</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>I have a field-less enum representing various error conditions:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+</pre></td><td class="code"><pre><span class="nd">#[derive(Debug,</span> <span class="nd">Clone,</span> <span class="nd">Copy)]</span>
+<span class="k">pub</span> <span class="k">enum</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="n">InvalidSignature</span><span class="p">,</span>
+  <span class="n">AccountNotFound</span><span class="p">,</span>
+  <span class="n">InsufficientBalance</span><span class="p">,</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This is a type I expect to change fairly often.
+I predict that it will grow a lot.
+Even the initial version contains half a dozen variants already!
+For brevity, I am showing only a subset here.</p>
+</div>
+<div class="paragraph">
+<p>For the purposes of serialization, I would like to convert this error to and from an error code.
+One direction is easy, there&#8217;s built in mechanism for this in Rust:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno">1
+2
+3
+4
+5
+</pre></td><td class="code"><pre><span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">as_code</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">u32</span> <span class="p">{</span>
+    <span class="k">self</span> <span class="k">as</span> <span class="nb">u32</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The other direction is more annoying: it isn&#8217;t handled by the language automatically yet (although there&#8217;s an in-progress PR which adds just that!), so we have to write some code ourselves:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+</pre></td><td class="code"><pre><span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">as_code</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">u32</span> <span class="p">{</span>
+    <span class="k">self</span> <span class="k">as</span> <span class="nb">u32</span>
+  <span class="p">}</span>
+
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">from_code</span><span class="p">(</span><span class="n">code</span><span class="p">:</span> <span class="nb">u32</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="n">Error</span><span class="o">&gt;</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">res</span> <span class="o">=</span> <span class="k">match</span> <span class="n">code</span> <span class="p">{</span>
+      <span class="mi">0</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">InvalidSignature</span><span class="p">,</span>
+      <span class="mi">1</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">AccountNotFound</span><span class="p">,</span>
+      <span class="mi">2</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">InsufficientBalance</span><span class="p">,</span>
+      <span class="mi">_</span> <span class="k">=&gt;</span> <span class="k">return</span> <span class="nb">None</span><span class="p">,</span>
+    <span class="p">};</span>
+    <span class="nf">Some</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Now, given that I expect this type to change frequently, this is asking for trouble!
+It&#8217;s very easy for the <code>match</code> and the enum definition to get out of sync!</p>
+</div>
+<div class="paragraph">
+<p>What should we do? What <em>can</em> we do?</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="minimalist-solution"><a class="anchor" href="#minimalist-solution"></a>Minimalist Solution</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Now, seasoned Rust developers are probably already thinking about macros (or maybe even about specific macro crates).
+And we&#8217;ll get there!
+But first, let&#8217;s see how I usually solve the problem, when (as I am by default) I am not keen on adding macros.</p>
+</div>
+<div class="paragraph">
+<p>The idea is to trick the compiler into telling us the number of elements in the enum, which would allow us to implement some sanity checking.
+We can do this by adding a fake element at the end of the enum:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+</pre></td><td class="code"><pre><span class="nd">#[derive(Debug,</span> <span class="nd">Clone,</span> <span class="nd">Copy,</span> <span class="nd">PartialEq,</span> <span class="nd">Eq)]</span>
+<span class="k">pub</span> <span class="k">enum</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="n">InvalidSignature</span><span class="p">,</span>
+  <span class="n">AccountNotFound</span><span class="p">,</span>
+  <span class="n">InsufficientBalance</span><span class="p">,</span>
+  <span class="mi">__</span><span class="n">LAST</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="k">const</span> <span class="n">ALL</span><span class="p">:</span> <span class="p">[</span><span class="n">Error</span><span class="p">;</span> <span class="nn">Error</span><span class="p">::</span><span class="mi">__</span><span class="n">LAST</span> <span class="k">as</span> <span class="nb">usize</span><span class="p">]</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="nn">Error</span><span class="p">::</span><span class="n">InvalidSignature</span><span class="p">,</span>
+    <span class="nn">Error</span><span class="p">::</span><span class="n">AccountNotFound</span><span class="p">,</span>
+    <span class="nn">Error</span><span class="p">::</span><span class="n">InsufficientBalance</span><span class="p">,</span>
+  <span class="p">];</span>
+
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">from_code</span><span class="p">(</span><span class="n">code</span><span class="p">:</span> <span class="nb">u32</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="n">Error</span><span class="o">&gt;</span> <span class="p">{</span>
+    <span class="nn">Error</span><span class="p">::</span><span class="n">ALL</span><span class="nf">.get</span><span class="p">(</span><span class="n">code</span> <span class="k">as</span> <span class="nb">usize</span><span class="p">)</span><span class="nf">.copied</span><span class="p">()</span>
+  <span class="p">}</span>
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">as_code</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">u32</span> <span class="p">{</span>
+    <span class="nn">Error</span><span class="p">::</span><span class="n">ALL</span>
+      <span class="nf">.into_iter</span><span class="p">()</span>
+      <span class="nf">.position</span><span class="p">(|</span><span class="n">it</span><span class="p">|</span> <span class="n">it</span> <span class="o">==</span> <span class="k">self</span><span class="p">)</span>
+      <span class="nf">.unwrap_or_default</span><span class="p">()</span> <span class="k">as</span> <span class="nb">u32</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Now, if we add a new error variant, but forget to update the <code>ALL</code> array, the code will fail to compile&#8201;&#8212;&#8201;exactly the reminder we need.
+The major drawback here is that <code>__LAST</code> variant has to exist.
+This is fine for internal stuff, but something not really great for a public, clean API.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="minimalist-macro"><a class="anchor" href="#minimalist-macro"></a>Minimalist Macro</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Now, let&#8217;s get to macros, and let&#8217;s start with the simplest possible one I can think of!</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+</pre></td><td class="code"><pre><span class="nd">define_error!</span><span class="p">[</span>
+  <span class="n">InvalidSignature</span><span class="p">,</span>
+  <span class="n">AccountNotFound</span><span class="p">,</span>
+  <span class="n">InsufficientBalance</span><span class="p">,</span>
+<span class="p">];</span>
+
+<span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">as_code</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">u32</span> <span class="p">{</span>
+    <span class="k">self</span> <span class="k">as</span> <span class="nb">u32</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Pretty simple, heh? Let&#8217;s look at the definition of <code>define_error!</code> though:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+</pre></td><td class="code"><pre><span class="nd">macro_rules!</span> <span class="n">define_error</span> <span class="p">{</span>
+  <span class="p">(</span><span class="nv">$</span><span class="p">(</span><span class="nv">$err:ident</span><span class="p">,)</span><span class="o">*</span><span class="p">)</span> <span class="k">=&gt;</span> <span class="p">{</span>
+    <span class="nd">#[derive(Debug,</span> <span class="nd">Clone,</span> <span class="nd">Copy,</span> <span class="nd">PartialEq,</span> <span class="nd">Eq)]</span>
+    <span class="k">pub</span> <span class="k">enum</span> <span class="n">Error</span> <span class="p">{</span>
+      <span class="nv">$</span><span class="p">(</span><span class="nv">$err</span><span class="p">,)</span><span class="o">*</span>
+    <span class="p">}</span>
+
+    <span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+      <span class="k">pub</span> <span class="k">fn</span> <span class="nf">from_code</span><span class="p">(</span><span class="n">code</span><span class="p">:</span> <span class="nb">u32</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="n">Error</span><span class="o">&gt;</span> <span class="p">{</span>
+        <span class="nd">#![allow(non_upper_case_globals)]</span>
+        <span class="nv">$</span><span class="p">(</span><span class="k">const</span> <span class="nv">$err</span><span class="p">:</span> <span class="nb">u32</span> <span class="o">=</span> <span class="nn">Error</span><span class="p">::</span><span class="nv">$err</span> <span class="k">as</span> <span class="nb">u32</span><span class="p">;)</span><span class="o">*</span>
+        <span class="k">match</span> <span class="n">code</span> <span class="p">{</span>
+          <span class="nv">$</span><span class="p">(</span><span class="nv">$err</span> <span class="k">=&gt;</span> <span class="nf">Some</span><span class="p">(</span><span class="nn">Error</span><span class="p">::</span><span class="nv">$err</span><span class="p">),)</span><span class="o">*</span>
+          <span class="mi">_</span> <span class="k">=&gt;</span> <span class="nb">None</span><span class="p">,</span>
+        <span class="p">}</span>
+      <span class="p">}</span>
+    <span class="p">}</span>
+  <span class="p">};</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>That&#8217;s &#8230;&#8203; quite literally a puzzle!
+Declarative macro machinery is comparatively inexpressive, so you need to get creative to get what you want.
+Here, ideally I&#8217;d write</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno">1
+2
+3
+4
+5
+</pre></td><td class="code"><pre><span class="k">match</span> <span class="n">code</span> <span class="p">{</span>
+  <span class="mi">0</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">InvalidSignature</span><span class="p">,</span>
+  <span class="mi">1</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">AccountNotFound</span><span class="p">,</span>
+  <span class="mi">2</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">InsufficientBalance</span><span class="p">,</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Alas, counting in macro by example is possible, but not trivial.
+It&#8217;s a subpuzle!
+Rather than solving it, I use the following work-around:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno">1
+2
+3
+4
+</pre></td><td class="code"><pre><span class="k">const</span> <span class="n">InvalidSignature</span><span class="p">:</span> <span class="nb">u32</span> <span class="o">=</span> <span class="nn">Error</span><span class="p">::</span><span class="n">InvalidSignature</span> <span class="k">as</span> <span class="nb">u32</span><span class="p">;</span>
+<span class="k">match</span> <span class="p">{</span>
+  <span class="n">InvalidSignature</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">InvalidSignature</span><span class="p">,</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>And then I have to <code>#![allow(non_upper_case_globals)]</code>, to prevent the compiler from complaining.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="idiomatic-macro"><a class="anchor" href="#idiomatic-macro"></a>Idiomatic Macro</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>The big problem with macro is that it&#8217;s not only the internal implementation which is baroque!
+The call-site is pretty inscrutable as well!
+Let&#8217;s imagine we are new to a codebase, and come across the following snippet:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+</pre></td><td class="code"><pre><span class="nd">define_error!</span><span class="p">[</span>
+  <span class="n">InvalidSignature</span><span class="p">,</span>
+  <span class="n">AccountNotFound</span><span class="p">,</span>
+  <span class="n">InsufficientBalance</span><span class="p">,</span>
+<span class="p">];</span>
+
+<span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">as_code</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">u32</span> <span class="p">{</span>
+    <span class="k">self</span> <span class="k">as</span> <span class="nb">u32</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>The question I would ask here would be &#8220;what&#8217;s that <code>Error</code> thing is?&#8221;.
+Luckily, we live in the age of powerful IDEs, so we can just &#8220;goto definition&#8221; to answer that, right?</p>
+</div>
+<div class="imageblock text-center">
+<div class="content">
+<img src="/assets/gotodef-macro-1.gif" alt="gotodef macro 1">
+</div>
+</div>
+<div class="paragraph">
+<p>Well, not really.
+An IDE says that the <code>Error</code> token is produced by <em>something</em> inside that macro invocation.
+That&#8217;s a correct answer, if not the most useful one!
+So I have to read the definition of the <code>define_error</code> macro and understand how that works internally to get the idea about public API available externally (e.g., that the <code>Error</code> refers to a public enum).
+And here the puzzler nature of declarative macros is exacerbated.
+It&#8217;s hard enough to figure out how to express the idea you want using the restricted language of macros.
+It&#8217;s doubly hard to understand the idea the macro&#8217;s <em>author</em> had when you can&#8217;t peek inside their brain and observer only to the implementation of the macro.</p>
+</div>
+<div class="paragraph">
+<p>One remedy here is to make macro input look more like the code we want to produce.
+Something like this:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+</pre></td><td class="code"><pre><span class="nd">define_error!</span><span class="p">[</span>
+  <span class="nd">#[derive(Debug,</span> <span class="nd">Clone,</span> <span class="nd">Copy,</span> <span class="nd">PartialEq,</span> <span class="nd">Eq)]</span>
+  <span class="k">pub</span> <span class="k">enum</span> <span class="n">Error</span> <span class="p">{</span>
+    <span class="n">InvalidSignature</span><span class="p">,</span>
+    <span class="n">AccountNotFound</span><span class="p">,</span>
+    <span class="n">InsufficientBalance</span><span class="p">,</span>
+  <span class="p">}</span>
+<span class="p">];</span>
+
+<span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">as_code</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">u32</span> <span class="p">{</span>
+    <span class="k">self</span> <span class="k">as</span> <span class="nb">u32</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This indeed is marginally friendlier for IDEs and people to make sense of:</p>
+</div>
+<div class="imageblock text-center">
+<div class="content">
+<img src="/assets/gotodef-macro-2.gif" alt="gotodef macro 2">
+</div>
+</div>
+<div class="paragraph">
+<p>The cost for this is a more complicated macro implementation.
+Generally, a macro needs to do two things: parse arbitrary token stream input, and emit valid Rust code as output.
+Parsing is usually the more complicated task.
+That&#8217;s why in our minimal attempt we used maximally simple syntax, just a list of identifiers.
+However, if we want to make the input of the macro look more like Rust, we have to parse a subset of Rust, and that&#8217;s more involved:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+</pre></td><td class="code"><pre><span class="nd">macro_rules!</span> <span class="n">define_error</span> <span class="p">{</span>
+  <span class="p">(</span>
+    <span class="nv">$</span><span class="p">(</span><span class="nd">#[</span><span class="err">$</span><span class="nd">meta:meta]</span><span class="p">)</span><span class="o">*</span>
+    <span class="nv">$vis:vis</span> <span class="k">enum</span> <span class="nv">$Error:ident</span> <span class="p">{</span>
+      <span class="nv">$</span><span class="p">(</span><span class="nv">$err:ident</span><span class="p">,)</span><span class="o">*</span>
+    <span class="p">}</span>
+  <span class="p">)</span> <span class="k">=&gt;</span> <span class="p">{</span>
+    <span class="nv">$</span><span class="p">(</span><span class="nd">#[</span><span class="err">$</span><span class="nd">meta]</span><span class="p">)</span><span class="o">*</span>
+    <span class="nv">$vis</span> <span class="k">enum</span> <span class="nv">$Error</span> <span class="p">{</span>
+      <span class="nv">$</span><span class="p">(</span><span class="nv">$err</span><span class="p">,)</span><span class="o">*</span>
+    <span class="p">}</span>
+
+    <span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+      <span class="k">pub</span> <span class="k">fn</span> <span class="nf">from_code</span><span class="p">(</span><span class="n">code</span><span class="p">:</span> <span class="nb">u32</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="n">Error</span><span class="o">&gt;</span> <span class="p">{</span>
+        <span class="nd">#![allow(non_upper_case_globals)]</span>
+        <span class="nv">$</span><span class="p">(</span><span class="k">const</span> <span class="nv">$err</span><span class="p">:</span> <span class="nb">u32</span> <span class="o">=</span> <span class="nv">$Error</span><span class="p">::</span><span class="nv">$err</span> <span class="k">as</span> <span class="nb">u32</span><span class="p">;)</span><span class="o">*</span>
+        <span class="k">match</span> <span class="n">code</span> <span class="p">{</span>
+          <span class="nv">$</span><span class="p">(</span><span class="nv">$err</span> <span class="k">=&gt;</span> <span class="nf">Some</span><span class="p">(</span><span class="nv">$Error</span><span class="p">::</span><span class="nv">$err</span><span class="p">),)</span><span class="o">*</span>
+          <span class="mi">_</span> <span class="k">=&gt;</span> <span class="nb">None</span><span class="p">,</span>
+        <span class="p">}</span>
+      <span class="p">}</span>
+    <span class="p">}</span>
+  <span class="p">};</span>
+<span class="p">}</span>
+
+<span class="nd">define_error!</span><span class="p">[</span>
+  <span class="nd">#[derive(Debug,</span> <span class="nd">Clone,</span> <span class="nd">Copy,</span> <span class="nd">PartialEq,</span> <span class="nd">Eq)]</span>
+  <span class="k">pub</span> <span class="k">enum</span> <span class="n">Error</span> <span class="p">{</span>
+    <span class="n">InvalidSignature</span><span class="p">,</span>
+    <span class="n">AccountNotFound</span><span class="p">,</span>
+    <span class="n">InsufficientBalance</span><span class="p">,</span>
+  <span class="p">}</span>
+<span class="p">];</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>We have to carefully deal with all those visibilities and attributes.
+Even after we do that, the connection between the input Rust-like syntax and the output Rust is skin-deep.
+This is mostly smoke and mirrors, and is not much different from, e.g., using Haskell syntax here:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+</pre></td><td class="code"><pre><span class="nd">macro_rules!</span> <span class="n">define_error</span> <span class="p">{</span>
+  <span class="p">(</span>
+    <span class="n">data</span> <span class="nv">$Error:ident</span> <span class="o">=</span> <span class="nv">$err0:ident</span> <span class="nv">$</span><span class="p">(|</span> <span class="nv">$err:ident</span><span class="p">)</span><span class="o">*</span>
+      <span class="nv">$</span><span class="p">(</span><span class="nf">deriving</span> <span class="p">(</span><span class="nv">$</span><span class="p">(</span><span class="nv">$derive:ident</span><span class="p">),</span><span class="o">*</span><span class="p">))</span><span class="o">?</span>
+  <span class="p">)</span> <span class="k">=&gt;</span> <span class="p">{</span>
+    <span class="nv">$</span><span class="p">(</span><span class="nd">#[derive(</span><span class="err">$</span><span class="nd">(</span><span class="err">$</span><span class="nd">derive),</span><span class="err">*</span><span class="nd">)]</span><span class="p">)</span><span class="o">?</span>
+    <span class="k">enum</span> <span class="nv">$Error</span> <span class="p">{</span>
+      <span class="nv">$err0</span><span class="p">,</span>
+      <span class="nv">$</span><span class="p">(</span><span class="nv">$err</span><span class="p">,)</span><span class="o">*</span>
+    <span class="p">}</span>
+
+    <span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+      <span class="k">pub</span> <span class="k">fn</span> <span class="nf">from_code</span><span class="p">(</span><span class="n">code</span><span class="p">:</span> <span class="nb">u32</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="n">Error</span><span class="o">&gt;</span> <span class="p">{</span>
+        <span class="nd">#![allow(non_upper_case_globals)]</span>
+        <span class="k">const</span> <span class="nv">$err0</span><span class="p">:</span> <span class="nb">u32</span> <span class="o">=</span> <span class="nv">$Error</span><span class="p">::</span><span class="nv">$err0</span> <span class="k">as</span> <span class="nb">u32</span><span class="p">;</span>
+        <span class="nv">$</span><span class="p">(</span><span class="k">const</span> <span class="nv">$err</span><span class="p">:</span> <span class="nb">u32</span> <span class="o">=</span> <span class="nv">$Error</span><span class="p">::</span><span class="nv">$err</span> <span class="k">as</span> <span class="nb">u32</span><span class="p">;)</span><span class="o">*</span>
+        <span class="k">match</span> <span class="n">code</span> <span class="p">{</span>
+          <span class="nv">$err0</span> <span class="k">=&gt;</span> <span class="nf">Some</span><span class="p">(</span><span class="nv">$Error</span><span class="p">::</span><span class="nv">$err0</span><span class="p">),</span>
+          <span class="nv">$</span><span class="p">(</span><span class="nv">$err</span> <span class="k">=&gt;</span> <span class="nf">Some</span><span class="p">(</span><span class="nv">$Error</span><span class="p">::</span><span class="nv">$err</span><span class="p">),)</span><span class="o">*</span>
+          <span class="mi">_</span> <span class="k">=&gt;</span> <span class="nb">None</span><span class="p">,</span>
+        <span class="p">}</span>
+      <span class="p">}</span>
+    <span class="p">}</span>
+  <span class="p">};</span>
+<span class="p">}</span>
+
+<span class="nd">define_error!</span><span class="p">[</span>
+  <span class="n">data</span> <span class="n">Error</span> <span class="o">=</span> <span class="n">InvalidSignature</span> <span class="p">|</span> <span class="n">AccountNotFound</span> <span class="p">|</span> <span class="n">InsufficientBalance</span>
+    <span class="nf">deriving</span> <span class="p">(</span><span class="n">Debug</span><span class="p">,</span> <span class="n">Clone</span><span class="p">,</span> <span class="nb">Copy</span><span class="p">,</span> <span class="n">PartialEq</span><span class="p">,</span> <span class="nb">Eq</span><span class="p">)</span>
+
+<span class="p">];</span>
+
+<span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">as_code</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">u32</span> <span class="p">{</span>
+    <span class="k">self</span> <span class="k">as</span> <span class="nb">u32</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="attribute-macro"><a class="anchor" href="#attribute-macro"></a>Attribute Macro</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>We can meaningfully increase the fidelity between macro input and macro output by switching to a derive macro.
+In contrast to function-like macros, derives require that their input is syntactically and even semantically valid Rust.</p>
+</div>
+<div class="paragraph">
+<p>So the result looks like this:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+</pre></td><td class="code"><pre><span class="k">use</span> <span class="nn">macros</span><span class="p">::</span><span class="n">FromCode</span><span class="p">;</span>
+
+<span class="nd">#[derive(FromCode,</span> <span class="nd">Debug,</span> <span class="nd">Clone,</span> <span class="nd">Copy,</span> <span class="nd">PartialEq,</span> <span class="nd">Eq)]</span>
+<span class="k">enum</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="n">InvalidSignature</span><span class="p">,</span>
+  <span class="n">AccountNotFound</span><span class="p">,</span>
+  <span class="n">InsufficientBalance</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="k">pub</span> <span class="k">fn</span> <span class="nf">as_code</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">u32</span> <span class="p">{</span>
+    <span class="k">self</span> <span class="k">as</span> <span class="nb">u32</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Again, the <code>enum Error</code> here is an honest, simple enum!
+It&#8217;s not an alien beast which just wears enum&#8217;s skin.</p>
+</div>
+<div class="paragraph">
+<p>And the implementation of the macro doesn&#8217;t look too bad either, thanks to @dtolnay&#8217;s tasteful API design:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+</pre></td><td class="code"><pre><span class="k">use</span> <span class="nn">proc_macro</span><span class="p">::</span><span class="n">TokenStream</span><span class="p">;</span>
+<span class="k">use</span> <span class="nn">quote</span><span class="p">::</span><span class="n">quote</span><span class="p">;</span>
+<span class="k">use</span> <span class="nn">syn</span><span class="p">::{</span><span class="n">parse_macro_input</span><span class="p">,</span> <span class="n">DeriveInput</span><span class="p">};</span>
+
+<span class="nd">#[proc_macro_derive(FromCode)]</span>
+<span class="k">pub</span> <span class="k">fn</span> <span class="nf">from_code</span><span class="p">(</span><span class="n">input</span><span class="p">:</span> <span class="n">TokenStream</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="n">TokenStream</span> <span class="p">{</span>
+  <span class="k">let</span> <span class="n">input</span> <span class="o">=</span> <span class="nd">parse_macro_input!</span><span class="p">(</span><span class="n">input</span> <span class="k">as</span> <span class="n">DeriveInput</span><span class="p">);</span>
+  <span class="k">let</span> <span class="n">error_name</span> <span class="o">=</span> <span class="n">input</span><span class="py">.ident</span><span class="p">;</span>
+  <span class="k">let</span> <span class="n">enum_</span> <span class="o">=</span> <span class="k">match</span> <span class="n">input</span><span class="py">.data</span> <span class="p">{</span>
+    <span class="nn">syn</span><span class="p">::</span><span class="nn">Data</span><span class="p">::</span><span class="nf">Enum</span><span class="p">(</span><span class="n">it</span><span class="p">)</span> <span class="k">=&gt;</span> <span class="n">it</span><span class="p">,</span>
+    <span class="mi">_</span> <span class="k">=&gt;</span> <span class="nd">panic!</span><span class="p">(</span><span class="s">"expected an enum"</span><span class="p">),</span>
+  <span class="p">};</span>
+
+  <span class="k">let</span> <span class="n">arms</span> <span class="o">=</span>
+    <span class="n">enum_</span><span class="py">.variants</span><span class="nf">.iter</span><span class="p">()</span><span class="nf">.enumerate</span><span class="p">()</span><span class="nf">.map</span><span class="p">(|(</span><span class="n">i</span><span class="p">,</span> <span class="n">var</span><span class="p">)|</span> <span class="p">{</span>
+      <span class="k">let</span> <span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="k">as</span> <span class="nb">u32</span><span class="p">;</span>
+      <span class="k">let</span> <span class="n">var_name</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">var</span><span class="py">.ident</span><span class="p">;</span>
+      <span class="nd">quote!</span> <span class="p">{</span>
+        #<span class="n">i</span> <span class="k">=&gt;</span> <span class="nf">Some</span><span class="p">(</span>#<span class="nn">error_name</span><span class="p">::</span>#<span class="n">var_name</span><span class="p">),</span>
+      <span class="p">}</span>
+    <span class="p">});</span>
+
+  <span class="nd">quote!</span> <span class="p">{</span>
+    <span class="k">impl</span> #<span class="n">error_name</span> <span class="p">{</span>
+      <span class="k">pub</span> <span class="k">fn</span> <span class="nf">from_code</span><span class="p">(</span><span class="n">code</span><span class="p">:</span> <span class="nb">u32</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Option</span><span class="o">&lt;</span>#<span class="n">error_name</span><span class="o">&gt;</span> <span class="p">{</span>
+        <span class="k">match</span> <span class="n">code</span> <span class="p">{</span>
+          #<span class="p">(</span>#<span class="n">arms</span><span class="p">)</span><span class="o">*</span>
+          <span class="mi">_</span> <span class="k">=&gt;</span> <span class="nb">None</span><span class="p">,</span>
+        <span class="p">}</span>
+      <span class="p">}</span>
+    <span class="p">}</span>
+  <span class="p">}</span>
+  <span class="nf">.into</span><span class="p">()</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Unlike declarative macros, here we just directly express the syntax that we want to emit&#8201;&#8212;&#8201;a match over consecutive natural numbers.</p>
+</div>
+<div class="paragraph">
+<p>The biggest drawback here is that on the call-site now we don&#8217;t have <em>any</em> idea about the extra API generated by the macro.
+If, with declarative macros, you can notice an <code>pub fn from_code</code> in the same file and guess that that&#8217;s a part of an API, with a procedural macro that string is in a completely different crate!
+While proc-macro can greatly improve the ergonomics of using and implementing macros (inflated compile times notwithstanding), for the reader, they are arguably even more opaque than declarative macros.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="self-modifying-code"><a class="anchor" href="#self-modifying-code"></a>Self Modifying Code</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Finally, let&#8217;s see the promised hacky solution :)
+While, as you might have noticed, I am not a huge fan of macros, I like plain old code generation&#8201;&#8212;&#8201;text in, text out.
+Text manipulation is much worse-is-betterer than advanced macro systems.</p>
+</div>
+<div class="paragraph">
+<p>So what we are going to do is:</p>
+</div>
+<div class="ulist">
+<ul>
+<li>
+<p>Read the file with the enum definition as a string (<code>file!()</code> macro will be useful here).</p>
+</li>
+<li>
+<p>&#8220;Parse&#8221; enum definition using unsophisticated string splitting (<code>str::split_once</code>, aka <code>cut</code> would be our parser).</p>
+</li>
+<li>
+<p>Generate the code we want by concatenating strings.</p>
+</li>
+<li>
+<p>Paste the resulting code into a specially marked position.</p>
+</li>
+<li>
+<p>Overwrite the file in place, if there are changes.</p>
+</li>
+<li>
+<p>And we are going to use a <code>#[test]</code> to drive the process!</p>
+</li>
+</ul>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="rouge highlight"><code data-lang="rust"><table class="linenotable"><tbody><tr><td class="linenos gl"><pre class="lineno"> 1
+ 2
+ 3
+ 4
+ 5
+ 6
+ 7
+ 8
+ 9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+40
+41
+42
+43
+44
+45
+46
+47
+48
+49
+50
+51
+52
+53
+54
+55
+56
+57
+58
+59
+60
+61
+62
+63
+</pre></td><td class="code"><pre><span class="nd">#[derive(Debug,</span> <span class="nd">Clone,</span> <span class="nd">Copy)]</span>
+<span class="k">pub</span> <span class="k">enum</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="n">InsufficientBalance</span><span class="p">,</span>
+  <span class="n">InvalidSignature</span><span class="p">,</span>
+  <span class="n">AccountNotFound</span><span class="p">,</span>
+<span class="p">}</span>
+
+<span class="k">impl</span> <span class="n">Error</span> <span class="p">{</span>
+  <span class="k">fn</span> <span class="nf">as_code</span><span class="p">(</span><span class="k">self</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">u32</span> <span class="p">{</span>
+    <span class="k">self</span> <span class="k">as</span> <span class="nb">u32</span>
+  <span class="p">}</span>
+
+  <span class="k">fn</span> <span class="nf">from_code</span><span class="p">(</span><span class="n">code</span><span class="p">:</span> <span class="nb">u32</span><span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="n">Error</span><span class="o">&gt;</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">res</span> <span class="o">=</span> <span class="k">match</span> <span class="n">code</span> <span class="p">{</span>
+      <span class="c">// region:sourcegen</span>
+      <span class="mi">0</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">InsufficientBalance</span><span class="p">,</span>
+      <span class="mi">1</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">InvalidSignature</span><span class="p">,</span>
+      <span class="mi">2</span> <span class="k">=&gt;</span> <span class="nn">Error</span><span class="p">::</span><span class="n">AccountNotFound</span><span class="p">,</span>
+      <span class="c">// endregion:sourcegen</span>
+      <span class="mi">_</span> <span class="k">=&gt;</span> <span class="k">return</span> <span class="nb">None</span><span class="p">,</span>
+    <span class="p">};</span>
+    <span class="nf">Some</span><span class="p">(</span><span class="n">res</span><span class="p">)</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="nd">#[test]</span>
+<span class="k">fn</span> <span class="nf">sourcegen_from_code</span><span class="p">()</span> <span class="p">{</span>
+  <span class="k">let</span> <span class="n">original_text</span> <span class="o">=</span> <span class="nn">std</span><span class="p">::</span><span class="nn">fs</span><span class="p">::</span><span class="nf">read_to_string</span><span class="p">(</span><span class="nd">file!</span><span class="p">())</span><span class="nf">.unwrap</span><span class="p">();</span>
+  <span class="k">let</span> <span class="p">(</span><span class="mi">_</span><span class="p">,</span> <span class="n">variants</span><span class="p">,</span> <span class="mi">_</span><span class="p">)</span> <span class="o">=</span>
+    <span class="nf">split_twice</span><span class="p">(</span><span class="o">&amp;</span><span class="n">original_text</span><span class="p">,</span> <span class="s">"pub enum Error {</span><span class="se">\n</span><span class="s">"</span><span class="p">,</span> <span class="s">"}"</span><span class="p">)</span>
+      <span class="nf">.unwrap</span><span class="p">();</span>
+
+  <span class="k">let</span> <span class="n">arms</span> <span class="o">=</span> <span class="n">variants</span>
+    <span class="nf">.lines</span><span class="p">()</span>
+    <span class="nf">.map</span><span class="p">(|</span><span class="n">line</span><span class="p">|</span> <span class="n">line</span><span class="nf">.trim</span><span class="p">()</span><span class="nf">.trim_end_matches</span><span class="p">(</span><span class="sc">','</span><span class="p">))</span>
+    <span class="nf">.enumerate</span><span class="p">()</span>
+    <span class="nf">.map</span><span class="p">(|(</span><span class="n">i</span><span class="p">,</span> <span class="n">var</span><span class="p">)|</span> <span class="nd">format!</span><span class="p">(</span><span class="s">"      {i} =&gt; Error::{var},</span><span class="se">\n</span><span class="s">"</span><span class="p">))</span>
+    <span class="py">.collect</span><span class="p">::</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="p">();</span>
+
+  <span class="k">let</span> <span class="n">new_text</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="k">let</span> <span class="n">start_marker</span> <span class="o">=</span> <span class="s">"      // region:sourcegen</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+    <span class="k">let</span> <span class="n">end_marker</span> <span class="o">=</span> <span class="s">"      // endregion:sourcegen</span><span class="se">\n</span><span class="s">"</span><span class="p">;</span>
+    <span class="k">let</span> <span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="mi">_</span><span class="p">,</span> <span class="n">suffix</span><span class="p">)</span> <span class="o">=</span>
+      <span class="nf">split_twice</span><span class="p">(</span><span class="o">&amp;</span><span class="n">original_text</span><span class="p">,</span> <span class="n">start_marker</span><span class="p">,</span> <span class="n">end_marker</span><span class="p">)</span>
+        <span class="nf">.unwrap</span><span class="p">();</span>
+    <span class="nd">format!</span><span class="p">(</span><span class="s">"{prefix}{start_marker}{arms}{end_marker}{suffix}"</span><span class="p">)</span>
+  <span class="p">};</span>
+
+  <span class="k">if</span> <span class="n">new_text</span> <span class="o">!=</span> <span class="n">original_text</span> <span class="p">{</span>
+    <span class="nn">std</span><span class="p">::</span><span class="nn">fs</span><span class="p">::</span><span class="nf">write</span><span class="p">(</span><span class="nd">file!</span><span class="p">(),</span> <span class="n">new_text</span><span class="p">)</span><span class="nf">.unwrap</span><span class="p">();</span>
+    <span class="nd">panic!</span><span class="p">(</span><span class="s">"source was not up-to-date"</span><span class="p">)</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="k">fn</span> <span class="n">split_twice</span><span class="o">&lt;</span><span class="nv">'a</span><span class="o">&gt;</span><span class="p">(</span>
+  <span class="n">text</span><span class="p">:</span> <span class="o">&amp;</span><span class="nv">'a</span> <span class="nb">str</span><span class="p">,</span>
+  <span class="n">start_marker</span><span class="p">:</span> <span class="o">&amp;</span><span class="nb">str</span><span class="p">,</span>
+  <span class="n">end_marker</span><span class="p">:</span> <span class="o">&amp;</span><span class="nb">str</span><span class="p">,</span>
+<span class="p">)</span> <span class="k">-&gt;</span> <span class="nb">Option</span><span class="o">&lt;</span><span class="p">(</span><span class="o">&amp;</span><span class="nv">'a</span> <span class="nb">str</span><span class="p">,</span> <span class="o">&amp;</span><span class="nv">'a</span> <span class="nb">str</span><span class="p">,</span> <span class="o">&amp;</span><span class="nv">'a</span> <span class="nb">str</span><span class="p">)</span><span class="o">&gt;</span> <span class="p">{</span>
+  <span class="k">let</span> <span class="p">(</span><span class="n">prefix</span><span class="p">,</span> <span class="n">rest</span><span class="p">)</span> <span class="o">=</span> <span class="n">text</span><span class="nf">.split_once</span><span class="p">(</span><span class="n">start_marker</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+  <span class="k">let</span> <span class="p">(</span><span class="n">mid</span><span class="p">,</span> <span class="n">suffix</span><span class="p">)</span> <span class="o">=</span> <span class="n">rest</span><span class="nf">.split_once</span><span class="p">(</span><span class="n">end_marker</span><span class="p">)</span><span class="o">?</span><span class="p">;</span>
+  <span class="nf">Some</span><span class="p">((</span><span class="n">prefix</span><span class="p">,</span> <span class="n">mid</span><span class="p">,</span> <span class="n">suffix</span><span class="p">))</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>That&#8217;s the whole pattern!
+Note how, unlike every other solution, it is crystal clear how the generated code works.
+It&#8217;s just code which you can goto-definition, or step through in debugging.
+You can be completely oblivious about the shady <code>#[test]</code> machinery, and that won&#8217;t harm understanding in any way.</p>
+</div>
+<div class="paragraph">
+<p>The code of the &#8220;macro&#8221; is also easy to understand&#8201;&#8212;&#8201;that&#8217;s literally string manipulation.
+What&#8217;s more, you can easily see how it works by just running the test!</p>
+</div>
+<div class="paragraph">
+<p>The &#8220;read and update your own source code&#8221; part is a bit mind-bending!
+But the implementation is tiny and only uses the standard library, so it should be easy to understand.</p>
+</div>
+<div class="paragraph">
+<p>Unlike macros, this doesn&#8217;t try to enforce at compile time that the generated code is fresh.
+If you update the <code>Error</code> definition, you need to re-run test for the generated code to be updated as well.
+But this <em>will</em> be caught by the tests.
+Note the important detail&#8201;&#8212;&#8201;the test only tries to update the source code if there are, in fact, changes.
+That is, writable <code>src/</code> is required only during development.</p>
+</div>
+<div class="paragraph">
+<p>That&#8217;s all, hope this survey was useful! Discussion on <a href="https://old.reddit.com/r/rust/comments/tp8tmn/blog_post_self_modifying_code/">/r/rust</a>.</p>
+</div>
+</div>
+</div>
+</article>
+
+  </main>
+
+  <footer class="site-footer">
+    <p>
+      <a href="https://github.com/matklad/matklad.github.io/edit/master/_posts/2022-03-26-self-modifying-code.adoc">
+        <i class="fa fa-edit"></i> fix typo
+      </a>
+
+      <a href=" /feed.xml">
+        <i class="fa fa-rss"></i> rss
+      </a>
+
+      <a href="https://github.com/matklad">
+        <i class="fa fa-github"></i> matklad
+      </a>
+    </p>
+  </footer>
+</body>
+
+</html>
